@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Signal Desk</title>
+  <meta name="theme-color" content="#1c1810" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Signal Desk" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="tape" class="tape"><div class="tape-inner" id="tape-inner">connecting…</div></div>
+
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1><span class="dot"></span> SIGNAL DESK <span class="sub">/ pump.fun paper terminal</span></h1>
+        <p class="micro">Paper trading by default · live trading is opt-in, see below</p>
+      </div>
+      <button id="runBtn" class="btn">PAUSED</button>
+    </div>
+
+    <div id="haltBanner" class="banner hidden"></div>
+
+    <div class="panel">
+      <div class="panel-head"><span>Paper trading account</span></div>
+      <div class="panel-body">
+        <div class="row" style="margin-bottom:10px; align-items:flex-end;">
+          <div>
+            <div class="clabel">Available balance</div>
+            <div id="balanceVal" class="cval good" style="font-size:22px;">$1000.00</div>
+            <div id="lockedVal" class="csub"></div>
+          </div>
+        </div>
+        <div class="row">
+          <input id="fundsInput" type="number" min="0" step="10" placeholder="amount" class="amountInput" />
+          <button id="depositBtn" class="btn ghost">+ Add funds</button>
+          <button id="withdrawBtn" class="btn ghost">− Withdraw</button>
+        </div>
+        <p class="micro">This is paper money only — adding or withdrawing here just changes the balance the bot sizes its simulated trades against. Position size in Parameters is capped by whatever balance is available; the bot stops opening new positions once paper funds run out.</p>
+      </div>
+    </div>
+
+    <div class="panel danger" id="livePanel">
+      <div class="panel-head">
+        <span>⚠ Live trading — real funds</span>
+        <button id="toggleLive" class="chev">▾</button>
+      </div>
+      <div class="panel-body hidden" id="liveBody">
+        <p class="micro warn">This places real trades with real SOL from the wallet below, unattended. No simulation, no undo. Only enable this once you understand and accept that risk.</p>
+
+        <div id="liveStatusBox" class="row" style="margin-bottom:10px; align-items:flex-start; justify-content:space-between;">
+          <div>
+            <div class="clabel">Wallet</div>
+            <div id="liveWalletVal" class="cval" style="font-size:13px;">not configured</div>
+            <div id="liveBalVal" class="csub"></div>
+          </div>
+          <div id="liveStateBadge" class="pill small">LIVE TRADING OFF</div>
+        </div>
+        <div id="liveErrBox" class="micro warn hidden"></div>
+
+        <div class="grid2" id="liveConfigGrid"></div>
+
+        <label class="field">
+          <span>Keypair file path (stays on this machine, never uploaded anywhere)</span>
+          <input id="liveKeypairPath" type="text" placeholder="./wallet/keypair.json" />
+        </label>
+        <label class="field">
+          <span>Solana RPC URL</span>
+          <input id="liveRpcUrl" type="text" placeholder="https://api.mainnet-beta.solana.com" />
+        </label>
+        <label class="field">
+          <span>Pool</span>
+          <select id="livePool">
+            <option value="auto">auto</option>
+            <option value="pump">pump</option>
+            <option value="raydium">raydium</option>
+          </select>
+        </label>
+
+        <div id="liveEnableBox">
+          <label class="field">
+            <span>Type exactly "ENABLE LIVE TRADING" to arm it</span>
+            <input id="liveConfirmInput" type="text" placeholder="ENABLE LIVE TRADING" />
+          </label>
+          <button id="liveEnableBtn" class="btn full danger-btn" disabled>Enable live trading</button>
+        </div>
+        <button id="liveDisableBtn" class="btn full danger-btn hidden">■ STOP LIVE TRADING NOW</button>
+
+        <div class="cards" style="margin-top:12px;">
+          <div class="card"><div class="clabel">Live P&L today</div><div id="livePnlVal" class="cval">0.000000 SOL</div></div>
+          <div class="card"><div class="clabel">Win / Loss</div><div id="liveWlVal" class="cval">0W – 0L</div></div>
+        </div>
+        <div id="liveHaltBanner" class="banner hidden"></div>
+
+        <div class="microlabel" style="margin-top:10px;">Open live positions</div>
+        <table id="livePosTable"><thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Chg</th><th>SOL</th></tr></thead><tbody></tbody></table>
+        <div id="livePosEmpty" class="empty">No open live positions.</div>
+
+        <div class="microlabel" style="margin-top:10px;">Live trade log</div>
+        <table id="liveTradeTable"><thead><tr><th>Token</th><th>Action</th><th>SOL</th><th>P&L</th><th>Tx</th></tr></thead><tbody></tbody></table>
+        <div id="liveTradeEmpty" class="empty">No live trades yet.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span>Data source</span>
+        <button id="toggleData" class="chev">▾</button>
+      </div>
+      <div class="panel-body">
+        <div class="row" style="margin-bottom:8px;">
+          <button id="simBtn" class="pill active">Simulated</button>
+          <button id="liveBtn" class="pill">Live pump.fun</button>
+          <span id="wsStatus" class="micro"></span>
+        </div>
+        <div id="dataBody">
+          <div id="errBox" class="micro warn hidden"></div>
+          <p class="micro">Live mode streams real new-token launches and migrations from pump.fun via PumpPortal, free. Add a PumpPortal API key to enable real price/volume momentum trading (their trade-stream data is metered against a small SOL-funded wallet on their end).</p>
+          <label class="field">
+            <span>PumpPortal API key (optional)</span>
+            <input id="apiKeyInput" type="password" placeholder="paste key to enable real trade data" />
+          </label>
+          <label class="field">
+            <span>ntfy.sh topic for push notifications (optional)</span>
+            <input id="ntfyInput" type="text" placeholder="e.g. my-signal-desk-9x2" />
+          </label>
+          <p class="micro">Install the free ntfy app and subscribe to this topic to get a push notification at noon each day, plus one whenever the trading day closes out.</p>
+          <button id="debugToggle" class="linklike">show raw feed (debug)</button>
+          <div id="debugFeed" class="debugbox hidden"></div>
+          <div class="grid2">
+            <div>
+              <div class="microlabel">New launches</div>
+              <div id="newFeed"></div>
+            </div>
+            <div>
+              <div class="microlabel">Migrations</div>
+              <div id="migFeed"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="clabel">Today's P&L</div><div id="pnlVal" class="cval">$0.00</div></div>
+      <div class="card"><div class="clabel">Win / Loss</div><div id="wlVal" class="cval">0W – 0L</div></div>
+      <div class="card"><div class="clabel">Open Positions</div><div id="posVal" class="cval">0 / 3</div><div id="posSub" class="csub"></div></div>
+      <div class="card"><div class="clabel">Loss Limit</div><div id="limVal" class="cval">-$150.00</div><div id="limSub" class="csub"></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span>Today's equity curve</span></div>
+      <div class="panel-body"><canvas id="equityChart" height="120"></canvas></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span id="posTitle">Open positions (0)</span></div>
+      <div class="panel-body"><table id="posTable"><thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Chg</th><th>Size</th></tr></thead><tbody></tbody></table><div id="posEmpty" class="empty">No open positions. The bot is scanning the tape for momentum matching your thresholds.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span>Bot self-feedback</span>
+        <button id="autoTuneBtn" class="pill small">SELF-TUNE OFF</button>
+      </div>
+      <div class="panel-body">
+        <ul id="feedbackList" class="feedback"></ul>
+        <p id="tuneNote" class="micro rule"></p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span id="tuneTitle">Auto-tune log (0)</span><button id="toggleTune" class="chev">▾</button></div>
+      <div class="panel-body hidden" id="tuneBody"><div id="tuneList"></div><div id="tuneEmpty" class="empty">No automatic adjustments yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span>Recent closed trades</span></div>
+      <div class="panel-body"><table id="tradeTable"><thead><tr><th>Token</th><th>P&L</th><th>Reason</th><th>Closed</th></tr></thead><tbody></tbody></table><div id="tradeEmpty" class="empty">No trades closed yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span>Parameters</span><button id="toggleConfig" class="chev">▾</button></div>
+      <div class="panel-body hidden" id="configBody">
+        <div class="grid2" id="configGrid"></div>
+        <label class="checkfield"><input type="checkbox" id="autoTuneCheck" /> Let the bot self-tune entry/exit params as it trades (every 8 trades)</label>
+        <button id="resetConfig" class="btn ghost full">Reset to defaults</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span id="reportsTitle">Daily reports (0)</span><button id="toggleReports" class="chev">▾</button></div>
+      <div class="panel-body hidden" id="reportsBody"><div id="reportsList"></div><div id="reportsEmpty" class="empty">A report is generated automatically each time the date rolls over.</div></div>
+    </div>
+
+    <p class="micro center foot">The paper trading panel above never places real orders. Only the separate "Live trading — real funds" panel can move real money, and only once explicitly armed. This server keeps running as long as the process is alive, independent of any browser tab.</p>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
