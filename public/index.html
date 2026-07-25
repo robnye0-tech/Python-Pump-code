@@ -100,7 +100,7 @@
         <div id="liveHaltBanner" class="banner hidden"></div>
 
         <div class="microlabel" style="margin-top:10px;">Open live positions</div>
-        <table id="livePosTable"><thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Chg</th><th>SOL</th></tr></thead><tbody></tbody></table>
+        <table id="livePosTable"><thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Chg</th><th>SOL</th><th></th></tr></thead><tbody></tbody></table>
         <div id="livePosEmpty" class="empty">No open live positions.</div>
 
         <div class="microlabel" style="margin-top:10px;">Live trade log</div>
@@ -191,6 +191,11 @@
       <div class="panel-head"><span>Parameters</span><button id="toggleConfig" class="chev">▾</button></div>
       <div class="panel-body hidden" id="configBody">
         <div class="grid2" id="configGrid"></div>
+        <label class="field">
+          <span>Min market cap (USD, 0=off)</span>
+          <input type="number" id="minMarketCapUsdInput" step="1" />
+        </label>
+        <p class="micro" id="solPriceNote">SOL price: loading…</p>
         <label class="checkfield"><input type="checkbox" id="autoTuneCheck" /> Let the bot self-tune entry/exit params as it trades (every 8 trades)</label>
         <button id="resetConfig" class="btn ghost full">Reset to defaults</button>
       </div>

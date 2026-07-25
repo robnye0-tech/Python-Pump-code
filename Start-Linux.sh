@@ -16,7 +16,15 @@ if [ ! -f "venv/deps_installed.txt" ]; then
   echo "installed" > venv/deps_installed.txt
 fi
 
-./venv/bin/python server.py
+echo "This window auto-restarts Signal Desk if it ever crashes. To fully stop"
+echo "it, close this window — closing just the child process is not enough,"
+echo "it will relaunch itself."
 echo ""
-echo "Signal Desk stopped. If that was unexpected, the error above explains why."
-read -p "Press Enter to close..."
+
+while true; do
+  ./venv/bin/python server.py
+  echo ""
+  echo "Signal Desk stopped (exit code $?) — restarting in 5 seconds."
+  echo "Close this window now if you meant to stop it for good."
+  sleep 5
+done

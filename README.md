@@ -67,6 +67,42 @@ API key (small SOL-funded wallet on their end, metered) enables real price/volum
 momentum. If PumpPortal's message schema changes, use "show raw feed (debug)" and
 adjust `_handle_pump_message` in `server.py`.
 
+## Speed / RPC endpoint
+
+If the bot feels slow or "choppy," the RPC endpoint is almost always why —
+every balance check, simulation, send, and confirmation poll goes through it,
+and the default public one (`api.mainnet-beta.solana.com`) is heavily
+rate-limited. Switch to a free-tier provider (Helius, QuickNode, Triton) in
+the Live trading panel's "Solana RPC URL" field; it takes effect on the next
+tick, no restart needed.
+
+## Entry filters: momentum, market cap, volume
+
+Beyond the momentum % thresholds, Parameters has an optional **Min market cap
+(USD, 0=off)** filter — entered in USD for convenience, converted to SOL
+internally using a SOL/USD price refreshed every ~60s from CoinGecko's public
+API (shown next to the field; the filter can't apply until that first loads).
+**Min recent volume (SOL, 0=off)** is a companion filter using a decayed sum
+of real SOL trade amounts per token. Both use data already present in
+PumpPortal's feed — no scraping, no new dependencies — and both are `0`
+(disabled) by default so existing behavior doesn't change until you set them.
+Simulated tokens always bypass both since they have no real market data.
+
+## Closing a live position manually
+
+The Live trading panel's Open Positions table has a **close** button per
+row — sells that position immediately at current market price, regardless of
+your take-profit/stop-loss/trailing-stop settings. User-initiated only; nothing
+auto-triggers it.
+
+## If the bot process crashes
+
+`Start-Windows.bat` (and the Mac/Linux launchers) now auto-restart Signal
+Desk if the process ever dies for any reason — you don't need to notice and
+relaunch it yourself. **To actually stop it, close the whole terminal/console
+window** (the X button) — closing just the Python process gets it relaunched
+within 5 seconds, by design.
+
 ## Live trading (real funds) — read this before touching it
 
 There is a real execution layer: the **Live trading** panel in the dashboard places

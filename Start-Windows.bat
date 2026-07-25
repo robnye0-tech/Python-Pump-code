@@ -40,7 +40,15 @@ if not exist "venv\deps_installed.txt" (
   echo installed > venv\deps_installed.txt
 )
 
+echo This window auto-restarts Signal Desk if it ever crashes. To fully stop
+echo it, close this window ^(the X button^) — closing just the child process
+echo is not enough, it will relaunch itself.
+echo.
+
+:runloop
 call venv\Scripts\python server.py
 echo.
-echo Signal Desk stopped. If that was unexpected, the error above explains why.
-pause
+echo Signal Desk stopped ^(exit code %ERRORLEVEL%^) — restarting in 5 seconds.
+echo Close this window now if you meant to stop it for good.
+timeout /t 5 /nobreak >nul
+goto runloop

@@ -59,6 +59,8 @@ state = {
     "ntfyTopic": _saved.get("ntfyTopic", ""),
     "wsStatus": "idle",
     "pumpPortalNotice": None,
+    "solUsdPrice": None,
+    "solUsdPriceAt": None,
     "running": False,
     "tokens": [engine.make_sim_token(n) for n in SIM_TOKEN_NAMES],
     "positions": [],
@@ -609,6 +611,27 @@ async def noon_notifier_loop():
         await asyncio.sleep(30)
 
 
+# ---------- SOL/USD price (for displaying/entering market cap in USD) ----------
+SOL_USD_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+SOL_USD_REFRESH_SEC = 60
+
+
+async def sol_usd_price_loop():
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(SOL_USD_PRICE_URL)
+                resp.raise_for_status()
+                price = resp.json()["solana"]["usd"]
+                state["solUsdPrice"] = float(price)
+                state["solUsdPriceAt"] = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            # keep the last known price rather than zeroing it out on a
+            # transient failure — the UI shows how stale it is
+            print(f"[price] failed to refresh SOL/USD price: {e}")
+        await asyncio.sleep(SOL_USD_REFRESH_SEC)
+
+
 async def broadcast_loop():
     while True:
         await asyncio.sleep(TICK_SEC)
@@ -643,6 +666,8 @@ def public_state() -> dict:
         "dataMode": state["dataMode"],
         "wsStatus": state["wsStatus"],
         "pumpPortalNotice": state["pumpPortalNotice"],
+        "solUsdPrice": state["solUsdPrice"],
+        "solUsdPriceAt": state["solUsdPriceAt"],
         "running": state["running"],
         "hasApiKey": bool(state["apiKey"]),
         "ntfyTopic": state["ntfyTopic"],
@@ -686,6 +711,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(live_tick_loop())
     asyncio.create_task(broadcast_loop())
     asyncio.create_task(noon_notifier_loop())
+    asyncio.create_task(sol_usd_price_loop())
     url = f"http://localhost:{PORT}"
     print(f"Signal Desk running at {url}")
     if os.environ.get("NO_AUTO_OPEN") != "1":
@@ -816,6 +842,67 @@ async def api_live_reset():
     runtime.buy_cooldowns = {}
     persist()
     return {"ok": True}
+
+
+@app.post("/api/live/close")
+async def api_live_close(req: Request):
+    """Manually closes one open live position immediately at current market
+    price, regardless of take-profit/stop-loss/trailing-stop. User-initiated
+    only — never called automatically."""
+    body = await req.json()
+    token_id = body.get("tokenId")
+    if not token_id:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "tokenId is required."})
+    if not state["liveTrading"]["enabled"] or runtime.live_wallet is None or runtime.live_connection is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Live trading is not enabled."})
+    if runtime.live_busy:
+        return JSONResponse(status_code=409, content={"ok": False, "error": "A live trade is already in progress — try again in a moment."})
+
+    pos = next((p for p in state["livePositions"] if p["tokenId"] == token_id), None)
+    if not pos:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "No open position for that token."})
+
+    runtime.live_busy = True
+    try:
+        tok = next((t for t in state["tokens"] if t["id"] == token_id), None)
+        cfg = state["liveTrading"]
+        fail_count = pos.get("sellFailCount", 0)
+        retry_slippage = min(cfg["slippagePct"] + fail_count * SELL_RETRY_SLIPPAGE_STEP, SELL_RETRY_SLIPPAGE_MAX)
+        token_name = (tok.get("name") if tok else None) or token_id
+        try:
+            result = await execute_trade(
+                connection=runtime.live_connection, wallet=runtime.live_wallet, mint=token_id,
+                action="sell", amount="100%", denominated_in_sol=False,
+                slippage_pct=retry_slippage, priority_fee_sol=cfg["priorityFeeSol"], pool=cfg["pool"],
+            )
+            change_pct = engine.pct(tok["price"], pos["entryPrice"]) if tok and tok["price"] else 0
+            pnl_sol = round(pos["solSpent"] * (change_pct / 100), 6)
+            state["liveDailyStats"]["pnlSol"] = round(state["liveDailyStats"]["pnlSol"] + pnl_sol, 6)
+            if pnl_sol > 0:
+                state["liveDailyStats"]["wins"] += 1
+            else:
+                state["liveDailyStats"]["losses"] += 1
+            state["livePositions"] = [p for p in state["livePositions"] if p["tokenId"] != token_id]
+            state["liveTrades"] = ([{
+                "id": f"{token_id}-{int(datetime.now().timestamp() * 1000)}",
+                "token": token_name, "action": "sell", "reason": "manual close",
+                "solSpent": pos["solSpent"], "pnlSol": pnl_sol,
+                "signature": result["signature"], "explorerUrl": result["explorerUrl"],
+                "date": state["liveDailyStats"]["date"], "closedAt": datetime.now(timezone.utc).isoformat(), "status": "confirmed",
+            }] + state["liveTrades"])[:200]
+            persist()
+            return {"ok": True}
+        except TradeError as e:
+            state["liveTrading"]["lastError"] = str(e)
+            _log_failed_trade(token_name, "sell", pos["solSpent"], str(e))
+            state["livePositions"] = [
+                {**p, "sellFailCount": p.get("sellFailCount", 0) + 1} if p["tokenId"] == token_id else p
+                for p in state["livePositions"]
+            ]
+            persist()
+            return JSONResponse(status_code=502, content={"ok": False, "error": str(e)})
+    finally:
+        runtime.live_busy = False
 
 
 @app.websocket("/")

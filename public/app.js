@@ -25,9 +25,12 @@ const CONFIG_FIELDS = [
   ['dailyLossLimit', 'Daily loss limit ($)'],
   ['dailyProfitFloor', 'Daily profit floor ($)'],
   ['dailyProfitCap', 'Daily profit cap ($)'],
-  ['minMarketCapSol', 'Min market cap (SOL, 0=off)'],
   ['minSolVolume', 'Min recent volume (SOL, 0=off)'],
 ];
+// minMarketCapSol is edited via a dedicated USD-denominated field
+// (minMarketCapUsdInput) instead of the generic grid above, since the
+// underlying config value is stored in SOL but USD is more intuitive —
+// see wireMinMarketCapUsdInput().
 
 function buildConfigGrid(config) {
   const grid = $('configGrid');
@@ -113,9 +116,19 @@ function renderLive(state) {
   const posBody = document.querySelector('#livePosTable tbody');
   posBody.innerHTML = state.livePositions.map(p => {
     const chg = p.currentPrice ? ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100 : 0;
-    return `<tr><td>${p.tokenName}</td><td>${p.entryPrice.toFixed(6)}</td><td>${p.currentPrice ? p.currentPrice.toFixed(6) : '—'}</td><td class="chg ${chg >= 0 ? 'up' : 'down'}">${pctStr(chg)}</td><td>${p.solSpent}</td></tr>`;
+    return `<tr><td>${p.tokenName}</td><td>${p.entryPrice.toFixed(6)}</td><td>${p.currentPrice ? p.currentPrice.toFixed(6) : '—'}</td><td class="chg ${chg >= 0 ? 'up' : 'down'}">${pctStr(chg)}</td><td>${p.solSpent}</td><td><button class="linklike closePosBtn" data-token-id="${p.tokenId}">close</button></td></tr>`;
   }).join('');
   $('livePosEmpty').classList.toggle('hidden', state.livePositions.length > 0);
+
+  $('solPriceNote').textContent = state.solUsdPrice
+    ? `SOL price: $${state.solUsdPrice.toFixed(2)} (refreshes every ~60s)`
+    : 'SOL price: unavailable — Min market cap (USD) filter cannot apply until this loads';
+  $('minMarketCapUsdInput').dataset.solPrice = state.solUsdPrice || '';
+  if (document.activeElement !== $('minMarketCapUsdInput')) {
+    $('minMarketCapUsdInput').value = state.solUsdPrice
+      ? Math.round((state.config.minMarketCapSol || 0) * state.solUsdPrice)
+      : '';
+  }
 
   const tradeBody = document.querySelector('#liveTradeTable tbody');
   tradeBody.innerHTML = state.liveTrades.map(t => {
@@ -320,6 +333,7 @@ $('resetConfig').addEventListener('click', () => {
   postJSON('/api/config', {
     positionSize: 40, maxOpenPositions: 3, momentumPriceThreshold: 9, momentumVolThreshold: 45,
     takeProfitPct: 18, stopLossPct: 8, trailingStopPct: 6, dailyLossLimit: 150, dailyProfitFloor: 250, dailyProfitCap: 1000,
+    minMarketCapSol: 0, minSolVolume: 0,
   });
 });
 
@@ -355,6 +369,28 @@ $('liveResetBtn').addEventListener('click', () => {
     'It does NOT sell your tokens — if you still hold them, you\'ll need to sell manually via your wallet. Continue?'
   );
   if (ok) postJSON('/api/live/reset', {});
+});
+
+document.querySelector('#livePosTable tbody').addEventListener('click', async (e) => {
+  if (!e.target.classList.contains('closePosBtn')) return;
+  const tokenId = e.target.dataset.tokenId;
+  const ok = confirm('Close this live position now at current market price? This sells immediately, regardless of your take-profit/stop-loss settings.');
+  if (!ok) return;
+  e.target.disabled = true;
+  e.target.textContent = 'closing…';
+  const result = await postJSON('/api/live/close', { tokenId });
+  if (!result.ok) alert(`Could not close position: ${result.error || 'unknown error'}`);
+});
+
+$('minMarketCapUsdInput').addEventListener('change', (e) => {
+  const usd = Number(e.target.value) || 0;
+  // last known state.solUsdPrice is stashed on the input itself by render()
+  const solPrice = Number(e.target.dataset.solPrice) || 0;
+  if (usd > 0 && !solPrice) {
+    alert('SOL price has not loaded yet — try again in a moment.');
+    return;
+  }
+  postJSON('/api/config', { minMarketCapSol: solPrice ? usd / solPrice : 0 });
 });
 
 // ---------- live connection to our own server ----------
