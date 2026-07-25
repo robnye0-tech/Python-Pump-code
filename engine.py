@@ -24,6 +24,11 @@ DEFAULT_CONFIG = {
     "dailyProfitFloor": 250,
     "dailyProfitCap": 1000,
     "autoTune": False,
+    # 0 = disabled. Both use data already present in PumpPortal's feed
+    # (marketCapSol directly; solVolumeEma is a decayed sum of real SOL trade
+    # amounts tracked per-token below) — no external data source involved.
+    "minMarketCapSol": 0,
+    "minSolVolume": 0,
 }
 
 # bounds the self-tuner is allowed to move strategy params within — it never
@@ -63,7 +68,7 @@ def make_sim_token(name: str) -> dict:
     }
 
 
-def make_live_token(mint: str, name: str | None) -> dict:
+def make_live_token(mint: str, name: str | None, market_cap_sol: float = 0) -> dict:
     return {
         "id": mint,
         "name": name or mint[:6],
@@ -75,6 +80,8 @@ def make_live_token(mint: str, name: str | None) -> dict:
         "migrated": False,
         "hasTradeData": False,
         "createdAt": datetime.now(timezone.utc).timestamp() * 1000,
+        "marketCapSol": market_cap_sol,
+        "solVolumeEma": 0,  # decayed sum of real SOL trade amounts — genuinely SOL-denominated, unlike `volume` above (an arbitrarily-scaled score used only for the momentum % signal)
     }
 
 
@@ -99,16 +106,19 @@ def step_sim_token(t: dict) -> dict:
     }
 
 
-def apply_trade_to_token(t: dict, sol_amount: float, token_amount: float) -> dict:
+def apply_trade_to_token(t: dict, sol_amount: float, token_amount: float, market_cap_sol: float | None = None) -> dict:
     """Applies one real trade event onto a live token's rolling history."""
     price = (sol_amount / token_amount) if token_amount > 0 else t["price"]
-    decayed_volume = t["volume"] * 0.9 + sol_amount * 10  # approximation of recent trade intensity
+    decayed_volume = t["volume"] * 0.9 + sol_amount * 10  # approximation of recent trade intensity, for the momentum % signal
+    sol_volume_ema = t.get("solVolumeEma", 0) * 0.9 + sol_amount  # genuinely SOL-denominated, for the min-volume filter
     return {
         **t,
         "price": price or t["price"],
         "priceHistory": t["priceHistory"][1:] + [price or t["price"]],
         "volume": decayed_volume,
         "volHistory": t["volHistory"][1:] + [decayed_volume],
+        "solVolumeEma": sol_volume_ema,
+        "marketCapSol": market_cap_sol if market_cap_sol is not None else t.get("marketCapSol", 0),
         "hasTradeData": True,
     }
 
@@ -120,7 +130,15 @@ def momentum_signal(t: dict, cfg: dict) -> dict:
     price_change = pct(t["price"], price_ago)
     vol_change = pct(t["volume"], vol_ago)
     eligible = t.get("hasTradeData", False) if t.get("live") else True
-    hit = eligible and price_change >= cfg["momentumPriceThreshold"] and vol_change >= cfg["momentumVolThreshold"]
+    # size filters use data already present in PumpPortal's feed (marketCapSol
+    # directly; solVolumeEma is a decayed sum of real SOL trade amounts) — 0
+    # means the filter is off. Simulated tokens have no real market cap/volume
+    # data, so they're only gated by these filters when a filter is actually set.
+    size_ok = (
+        t.get("marketCapSol", 0) >= cfg.get("minMarketCapSol", 0)
+        and t.get("solVolumeEma", 0) >= cfg.get("minSolVolume", 0)
+    ) if t.get("live") else True
+    hit = eligible and size_ok and price_change >= cfg["momentumPriceThreshold"] and vol_change >= cfg["momentumVolThreshold"]
     return {"priceChange": price_change, "volChange": vol_change, "hit": hit}
 
 

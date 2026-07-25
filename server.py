@@ -326,7 +326,7 @@ async def _handle_pump_message(raw, ws):
 
     if tx_type == "create" and mint:
         if not any(t["id"] == mint for t in state["tokens"]):
-            tok = engine.make_live_token(mint, _coalesce(data.get("symbol"), data.get("name")))
+            tok = engine.make_live_token(mint, _coalesce(data.get("symbol"), data.get("name")), float(data.get("marketCapSol") or 0))
             runtime.watchlist = (runtime.watchlist + [mint])[-WATCHLIST_MAX:]
             if state["apiKey"]:
                 try:
@@ -358,8 +358,9 @@ async def _handle_pump_message(raw, ws):
     if tx_type in ("buy", "sell") and mint:
         sol_amount = float(_coalesce(data.get("solAmount"), data.get("sol_amount"), 0))
         token_amount = float(_coalesce(data.get("tokenAmount"), data.get("token_amount"), 0))
+        market_cap_sol = data.get("marketCapSol")
         state["tokens"] = [
-            engine.apply_trade_to_token(t, sol_amount, token_amount) if t["id"] == mint else t
+            engine.apply_trade_to_token(t, sol_amount, token_amount, float(market_cap_sol) if market_cap_sol is not None else None) if t["id"] == mint else t
             for t in state["tokens"]
         ]
 
@@ -651,6 +652,7 @@ def public_state() -> dict:
             {
                 "id": t["id"], "name": t["name"], "price": t["price"], "live": t.get("live", False),
                 "migrated": bool(t.get("migrated")), "hasTradeData": bool(t.get("hasTradeData")),
+                "marketCapSol": t.get("marketCapSol", 0), "solVolumeEma": t.get("solVolumeEma", 0),
                 "signal": engine.momentum_signal(t, state["config"]),
             }
             for t in state["tokens"][-20:]

@@ -25,6 +25,8 @@ const CONFIG_FIELDS = [
   ['dailyLossLimit', 'Daily loss limit ($)'],
   ['dailyProfitFloor', 'Daily profit floor ($)'],
   ['dailyProfitCap', 'Daily profit cap ($)'],
+  ['minMarketCapSol', 'Min market cap (SOL, 0=off)'],
+  ['minSolVolume', 'Min recent volume (SOL, 0=off)'],
 ];
 
 function buildConfigGrid(config) {
