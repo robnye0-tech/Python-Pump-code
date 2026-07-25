@@ -9,6 +9,7 @@ import json
 import os
 import random
 import string
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -102,6 +103,7 @@ class Runtime:
         self.live_wallet = None
         self.live_connection = None
         self.live_busy = False
+        self.buy_cooldowns: dict[str, float] = {}  # tokenId -> epoch time to skip re-attempting until
 
 
 runtime = Runtime()
@@ -156,6 +158,11 @@ def check_live_rollover():
     state["liveDailyStats"] = {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None}
 
 
+SELL_RETRY_SLIPPAGE_STEP = 5   # widen slippage tolerance this much per consecutive failed exit attempt
+SELL_RETRY_SLIPPAGE_MAX = 50   # ...but never past this, regardless of how many retries
+BUY_FAIL_COOLDOWN_SEC = 60     # after a failed buy, skip re-attempting that same token for this long
+
+
 def _log_failed_trade(token_name: str, action: str, sol_amount: float, error: str):
     """Records a failed buy/sell attempt in the live trade log — previously
     a failure only overwrote the single lastError field, with no persistent
@@ -203,11 +210,17 @@ async def live_tick():
                 close_reason = "trailing-stop"
 
             if close_reason:
+                fail_count = pos.get("sellFailCount", 0)
+                # widen slippage tolerance a bit more each consecutive failed
+                # exit attempt (capped) so a stuck position has an increasing
+                # chance of actually closing without needing manual help —
+                # trades off a worse fill price for a higher odds of exiting
+                retry_slippage = min(cfg["slippagePct"] + fail_count * SELL_RETRY_SLIPPAGE_STEP, SELL_RETRY_SLIPPAGE_MAX)
                 try:
                     result = await execute_trade(
                         connection=runtime.live_connection, wallet=runtime.live_wallet, mint=pos["tokenId"],
                         action="sell", amount="100%", denominated_in_sol=False,
-                        slippage_pct=cfg["slippagePct"], priority_fee_sol=cfg["priorityFeeSol"], pool=cfg["pool"],
+                        slippage_pct=retry_slippage, priority_fee_sol=cfg["priorityFeeSol"], pool=cfg["pool"],
                     )
                     pnl_sol = round(pos["solSpent"] * (change_pct / 100), 6)
                     state["liveDailyStats"]["pnlSol"] = round(state["liveDailyStats"]["pnlSol"] + pnl_sol, 6)
@@ -223,10 +236,10 @@ async def live_tick():
                         "date": state["liveDailyStats"]["date"], "closedAt": datetime.now(timezone.utc).isoformat(), "status": "confirmed",
                     }] + state["liveTrades"])[:200]
                 except TradeError as e:
-                    print(f"[live] sell failed, will retry next tick: {e}")
+                    print(f"[live] sell failed (attempt {fail_count + 1}, slippage {retry_slippage}%), will retry next tick: {e}")
                     state["liveTrading"]["lastError"] = str(e)
                     _log_failed_trade(tok.get("name") or pos["tokenId"], "sell", pos["solSpent"], str(e))
-                    still_open.append(pos)
+                    still_open.append({**pos, "sellFailCount": fail_count + 1})
                     continue
             else:
                 still_open.append({**pos, "highWater": high_water})
@@ -238,11 +251,14 @@ async def live_tick():
         can_open = not state["liveDailyStats"]["halted"] and len(state["livePositions"]) < cfg["maxConcurrentPositions"]
         if can_open:
             held_ids = {p["tokenId"] for p in state["livePositions"]}
+            now = time.time()
             for tok in state["tokens"]:
                 if len(state["livePositions"]) >= cfg["maxConcurrentPositions"]:
                     break
                 if not tok.get("live") or not tok.get("hasTradeData") or tok["id"] in held_ids or tok["price"] <= 0:
                     continue
+                if now < runtime.buy_cooldowns.get(tok["id"], 0):
+                    continue  # this token just failed to buy — skip it for a bit rather than hammering the same failure
                 sig = engine.momentum_signal(tok, state["config"])
                 if not sig["hit"]:
                     continue
@@ -263,7 +279,7 @@ async def live_tick():
                     state["livePositions"].append({
                         "tokenId": tok["id"], "entryPrice": tok["price"], "solSpent": cfg["maxSolPerTrade"],
                         "highWater": tok["price"], "openedAt": datetime.now(timezone.utc).isoformat(),
-                        "signature": result["signature"],
+                        "sellFailCount": 0, "signature": result["signature"],
                     })
                     held_ids.add(tok["id"])
                     state["liveTrades"] = ([{
@@ -277,6 +293,7 @@ async def live_tick():
                     print(f"[live] buy failed: {e}")
                     state["liveTrading"]["lastError"] = str(e)
                     _log_failed_trade(tok.get("name") or tok["id"], "buy", cfg["maxSolPerTrade"], str(e))
+                    runtime.buy_cooldowns[tok["id"]] = now + BUY_FAIL_COOLDOWN_SEC
         persist()
     except Exception as e:
         # Any unexpected failure in the live loop disables live trading
@@ -771,6 +788,20 @@ async def api_live_enable(req: Request):
 @app.post("/api/live/disable")
 async def api_live_disable():
     disable_live_trading()
+    return {"ok": True}
+
+
+@app.post("/api/live/reset")
+async def api_live_reset():
+    # Clears the bot's own tracking of open live positions and cooldowns —
+    # this does NOT sell anything on-chain. If a position is genuinely stuck
+    # (couldn't be closed even after auto-widening slippage), the tokens are
+    # still sitting in the wallet after this; sell them manually if needed.
+    # Trade history and daily P&L are left untouched.
+    state["livePositions"] = []
+    state["liveTrading"]["lastError"] = None
+    runtime.buy_cooldowns = {}
+    persist()
     return {"ok": True}
 
 

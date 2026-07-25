@@ -91,6 +91,7 @@ function renderLive(state) {
   $('liveStateBadge').classList.toggle('active', cfg.enabled);
   $('liveEnableBox').classList.toggle('hidden', cfg.enabled);
   $('liveDisableBtn').classList.toggle('hidden', !cfg.enabled);
+  $('liveResetBtn').classList.toggle('hidden', state.livePositions.length === 0);
 
   $('liveErrBox').classList.toggle('hidden', !cfg.lastError);
   if (cfg.lastError) $('liveErrBox').textContent = cfg.lastError;
@@ -345,6 +346,14 @@ $('liveEnableBtn').addEventListener('click', async () => {
 });
 
 $('liveDisableBtn').addEventListener('click', () => postJSON('/api/live/disable', {}));
+
+$('liveResetBtn').addEventListener('click', () => {
+  const ok = confirm(
+    'This stops the bot from tracking/retrying currently open live positions. ' +
+    'It does NOT sell your tokens — if you still hold them, you\'ll need to sell manually via your wallet. Continue?'
+  );
+  if (ok) postJSON('/api/live/reset', {});
+});
 
 // ---------- live connection to our own server ----------
 function connect() {
