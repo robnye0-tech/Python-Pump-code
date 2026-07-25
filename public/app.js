@@ -151,6 +151,9 @@ function render(state) {
   $('errBox').classList.toggle('hidden', state.wsStatus !== 'error');
   if (state.wsStatus === 'error') $('errBox').textContent = 'Live feed keeps dropping. Check your network / firewall, or that outbound WebSocket connections to pumpportal.fun are allowed from this machine.';
 
+  $('pumpPortalNoticeBox').classList.toggle('hidden', !state.pumpPortalNotice);
+  if (state.pumpPortalNotice) $('pumpPortalNoticeBox').textContent = `PumpPortal: ${state.pumpPortalNotice}`;
+
   if (!apiKeySaved && document.activeElement !== $('apiKeyInput')) {
     $('apiKeyInput').placeholder = state.hasApiKey ? 'key saved — paste to replace' : 'paste key to enable real trade data';
   }

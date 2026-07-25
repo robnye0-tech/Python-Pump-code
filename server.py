@@ -56,6 +56,7 @@ state = {
     "apiKey": _saved.get("apiKey", ""),
     "ntfyTopic": _saved.get("ntfyTopic", ""),
     "wsStatus": "idle",
+    "pumpPortalNotice": None,
     "running": False,
     "tokens": [engine.make_sim_token(n) for n in SIM_TOKEN_NAMES],
     "positions": [],
@@ -280,6 +281,15 @@ async def _handle_pump_message(raw, ws):
     mint = _coalesce(data.get("mint"), data.get("mintAddress"))
     tx_type = _coalesce(data.get("txType"), data.get("method"))
 
+    # PumpPortal sends bare {"message": "..."} frames for service notices —
+    # most commonly "subscribeTokenTrade... requires an API key funded with
+    # at least 0.02 SOL", which silently blocks all momentum trading (paper
+    # and live) since it means real trade data never arrives. Surface it
+    # instead of letting it only show up in the raw debug feed.
+    if not mint and not tx_type and isinstance(data.get("message"), str):
+        state["pumpPortalNotice"] = data["message"]
+        return
+
     if tx_type == "create" and mint:
         if not any(t["id"] == mint for t in state["tokens"]):
             tok = engine.make_live_token(mint, _coalesce(data.get("symbol"), data.get("name")))
@@ -361,6 +371,7 @@ def disconnect_live():
 
 def set_data_mode(mode: str):
     state["dataMode"] = mode
+    state["pumpPortalNotice"] = None
     if mode == "live":
         state["tokens"] = [t for t in state["tokens"] if t.get("live")]
         connect_live()
@@ -577,6 +588,7 @@ def public_state() -> dict:
         "config": state["config"],
         "dataMode": state["dataMode"],
         "wsStatus": state["wsStatus"],
+        "pumpPortalNotice": state["pumpPortalNotice"],
         "running": state["running"],
         "hasApiKey": bool(state["apiKey"]),
         "ntfyTopic": state["ntfyTopic"],
