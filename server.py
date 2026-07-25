@@ -333,7 +333,18 @@ async def _handle_pump_message(raw, ws):
                     await ws.send(json.dumps({"method": "subscribeTokenTrade", "keys": [mint]}))
                 except Exception:
                     pass
-            state["tokens"] = ([t for t in state["tokens"] if not t.get("live") or t["id"] in runtime.watchlist] + [tok])[-40:]
+            # Tokens outside the recent-watchlist window get pruned to bound
+            # the list for the dashboard — but a token backing an open paper
+            # or live position must never be dropped, or the bot silently
+            # loses the ability to ever check its stop-loss/take-profit
+            # again (pump.fun launches fast enough that this happened within
+            # seconds in practice). Held tokens are exempt from both the
+            # watchlist filter and the 40-token cap below.
+            held_ids = {p["tokenId"] for p in state["positions"]} | {p["tokenId"] for p in state["livePositions"]}
+            relevant = [t for t in state["tokens"] if not t.get("live") or t["id"] in runtime.watchlist or t["id"] in held_ids] + [tok]
+            held = [t for t in relevant if t["id"] in held_ids]
+            not_held = [t for t in relevant if t["id"] not in held_ids]
+            state["tokens"] = not_held[-(40 - len(held)):] + held if len(held) < 40 else held
         state["newTokenFeed"] = ([{
             "mint": mint, "name": data.get("name"), "symbol": data.get("symbol"), "at": int(datetime.now().timestamp() * 1000),
         }] + state["newTokenFeed"])[:FEED_MAX]
