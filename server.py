@@ -13,6 +13,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import websockets
@@ -320,8 +321,16 @@ async def _handle_pump_message(raw, ws):
 
 
 async def _pump_ws_run():
+    # PumpPortal's rejection wording ("only available when connecting with an
+    # API key...") means the key has to be attached to the connection itself,
+    # not just checked locally before sending a subscribeTokenTrade message —
+    # a bare connection is always treated as unauthenticated regardless of
+    # wallet funding. Not verified against a live connection from this
+    # environment (network-restricted) — if this still gets rejected, check
+    # PumpPortal's current docs for the exact query param name.
+    ws_url = f"{PUMPPORTAL_WS}?api-key={quote(state['apiKey'])}" if state["apiKey"] else PUMPPORTAL_WS
     try:
-        async with websockets.connect(PUMPPORTAL_WS) as ws:
+        async with websockets.connect(ws_url) as ws:
             runtime.pump_ws = ws
             state["wsStatus"] = "connected"
             await ws.send(json.dumps({"method": "subscribeNewToken"}))
@@ -675,6 +684,11 @@ async def api_post_apikey(req: Request):
     body = await req.json()
     state["apiKey"] = body.get("apiKey", "")
     persist()
+    # an already-open live connection was made without the key in the URL —
+    # reconnect so the new key actually takes effect instead of requiring the
+    # user to toggle data mode off and on themselves.
+    if state["dataMode"] == "live":
+        connect_live()
     return {"ok": True}
 
 
