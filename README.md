@@ -76,17 +76,35 @@ rate-limited. Switch to a free-tier provider (Helius, QuickNode, Triton) in
 the Live trading panel's "Solana RPC URL" field; it takes effect on the next
 tick, no restart needed.
 
-## Entry filters: momentum, market cap, volume
+## Entry filters: momentum, market cap, volume, token age
 
-Beyond the momentum % thresholds, Parameters has an optional **Min market cap
-(USD, 0=off)** filter — entered in USD for convenience, converted to SOL
+Beyond the momentum % thresholds, Parameters has optional **Min/Max market
+cap (USD, 0=off)** filters — entered in USD for convenience, converted to SOL
 internally using a SOL/USD price refreshed every ~60s from CoinGecko's public
-API (shown next to the field; the filter can't apply until that first loads).
-**Min recent volume (SOL, 0=off)** is a companion filter using a decayed sum
-of real SOL trade amounts per token. Both use data already present in
-PumpPortal's feed — no scraping, no new dependencies — and both are `0`
-(disabled) by default so existing behavior doesn't change until you set them.
-Simulated tokens always bypass both since they have no real market data.
+API (shown next to the fields; they can't apply until that first loads). Use
+both together for a "sweet spot" range, e.g. min $30,000 / max $80,000 for
+tokens that are established but still have room to run. **Min recent volume
+(SOL, 0=off)** is a companion filter using a decayed sum of real SOL trade
+amounts per token. **Min token age (seconds, 0=off)** skips newly-launched
+tokens — defaults to 300 (5 minutes) so brand-new, unproven launches are
+ignored. All of these use data already present in PumpPortal's feed or the
+token's own `createdAt` timestamp — no scraping, no new dependencies.
+Simulated tokens always bypass the market cap/volume filters since they have
+no real market data.
+
+## Market scanner: movers, high cap+volume, active wallets
+
+A new dashboard panel (collapsed by default — click to expand) computed
+entirely from tokens and trades the bot already tracks from the live feed:
+
+- **Movers** — currently-tracked tokens ranked by recent price/volume change,
+  the same numbers driving the bot's own momentum signal.
+- **Highest market cap + volume** — ranked by market cap, then volume.
+- **Most active wallets** — buys ≥1 SOL over the last 2 hours, aggregated by
+  wallet address and ranked by total SOL bought (top 50). This is
+  **informational only** — it is never wired into trade decisions. It uses
+  `traderPublicKey` and `solAmount`, both already present on every buy event
+  in PumpPortal's feed; no Solscan API or other external source involved.
 
 ## Closing a live position manually
 
@@ -203,7 +221,11 @@ see the dashboard's Parameters panel.
 signal-desk-python/
   server.py       — FastAPI + WebSocket server, PumpPortal client, trading engine loop
   engine.py        — pure trading logic: momentum signal, self-tuning, feedback text
-  state_store.py   — simple JSON file persistence (./data/state.json)
+  state_store.py   — simple JSON file persistence (./bin/state.json — trade
+                     history, config, and every self-tune adjustment; the bot
+                     picks up exactly where it left off on restart. Older
+                     versions used ./data/ instead; that gets migrated
+                     automatically the first time you run the updated code.)
   wallet.py        — loads your local Solana keypair, minimal raw JSON-RPC client
   live_trader.py   — builds/signs/simulates/submits real trades via PumpPortal
   wallet/          — put your keypair.json here (gitignored, never committed)

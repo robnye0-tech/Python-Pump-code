@@ -33,7 +33,7 @@
         <div class="row" style="margin-bottom:10px; align-items:flex-end;">
           <div>
             <div class="clabel">Available balance</div>
-            <div id="balanceVal" class="cval good" style="font-size:22px;">$1000.00</div>
+            <div id="balanceVal" class="cval good" style="font-size:22px;">10.0000 SOL</div>
             <div id="lockedVal" class="csub"></div>
           </div>
         </div>
@@ -150,10 +150,26 @@
     </div>
 
     <div class="cards">
-      <div class="card"><div class="clabel">Today's P&L</div><div id="pnlVal" class="cval">$0.00</div></div>
+      <div class="card"><div class="clabel">Today's P&L</div><div id="pnlVal" class="cval">0.0000 SOL</div></div>
       <div class="card"><div class="clabel">Win / Loss</div><div id="wlVal" class="cval">0W – 0L</div></div>
       <div class="card"><div class="clabel">Open Positions</div><div id="posVal" class="cval">0 / 3</div><div id="posSub" class="csub"></div></div>
-      <div class="card"><div class="clabel">Loss Limit</div><div id="limVal" class="cval">-$150.00</div><div id="limSub" class="csub"></div></div>
+      <div class="card"><div class="clabel">Loss Limit</div><div id="limVal" class="cval">-1.5000 SOL</div><div id="limSub" class="csub"></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span>Market scanner</span><button id="toggleScanner" class="chev">▾</button></div>
+      <div class="panel-body hidden" id="scannerBody">
+        <p class="micro">Computed entirely from tokens the bot already tracks from the live feed — not scraped from pump.fun, no external "movers" source.</p>
+        <div class="microlabel">Movers (biggest recent price moves)</div>
+        <table id="moversTable"><thead><tr><th>Token</th><th>Price</th><th>Chg</th><th>Vol Chg</th><th>MCap (SOL)</th></tr></thead><tbody></tbody></table>
+        <div id="moversEmpty" class="empty">No live tokens with trade data yet — enable Live pump.fun with an API key.</div>
+        <div class="microlabel" style="margin-top:12px;">Highest market cap + volume</div>
+        <table id="highCapTable"><thead><tr><th>Token</th><th>Price</th><th>MCap (SOL)</th><th>Volume (SOL)</th></tr></thead><tbody></tbody></table>
+        <div id="highCapEmpty" class="empty">No live tokens with trade data yet — enable Live pump.fun with an API key.</div>
+        <div class="microlabel" style="margin-top:12px;">Most active wallets (buys ≥1 SOL, last 2h) — informational only, not used in trade decisions</div>
+        <table id="topWalletsTable"><thead><tr><th>Wallet</th><th>Total bought</th><th>Buys</th><th>Tokens</th></tr></thead><tbody></tbody></table>
+        <div id="topWalletsEmpty" class="empty">No qualifying buys tracked yet.</div>
+      </div>
     </div>
 
     <div class="panel">
@@ -191,10 +207,16 @@
       <div class="panel-head"><span>Parameters</span><button id="toggleConfig" class="chev">▾</button></div>
       <div class="panel-body hidden" id="configBody">
         <div class="grid2" id="configGrid"></div>
-        <label class="field">
-          <span>Min market cap (USD, 0=off)</span>
-          <input type="number" id="minMarketCapUsdInput" step="1" />
-        </label>
+        <div class="grid2">
+          <label class="field">
+            <span>Min market cap (USD, 0=off)</span>
+            <input type="number" id="minMarketCapUsdInput" step="1" />
+          </label>
+          <label class="field">
+            <span>Max market cap (USD, 0=off)</span>
+            <input type="number" id="maxMarketCapUsdInput" step="1" />
+          </label>
+        </div>
         <p class="micro" id="solPriceNote">SOL price: loading…</p>
         <label class="checkfield"><input type="checkbox" id="autoTuneCheck" /> Let the bot self-tune entry/exit params as it trades (every 8 trades)</label>
         <button id="resetConfig" class="btn ghost full">Reset to defaults</button>

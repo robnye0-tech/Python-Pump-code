@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const money = (n) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
+const solStr = (n) => `${n < 0 ? '-' : ''}${Math.abs(n).toFixed(4)} SOL`;
 const pctStr = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 
 let apiKeySaved = false;
@@ -15,22 +15,23 @@ const LIVE_CONFIG_FIELDS = [
 let liveConfigLoaded = false;
 
 const CONFIG_FIELDS = [
-  ['positionSize', 'Position size ($)'],
+  ['positionSize', 'Position size (SOL)'],
   ['maxOpenPositions', 'Max open positions'],
   ['momentumPriceThreshold', 'Momentum: price %'],
   ['momentumVolThreshold', 'Momentum: volume %'],
   ['takeProfitPct', 'Take-profit %'],
   ['stopLossPct', 'Stop-loss %'],
   ['trailingStopPct', 'Trailing stop %'],
-  ['dailyLossLimit', 'Daily loss limit ($)'],
-  ['dailyProfitFloor', 'Daily profit floor ($)'],
-  ['dailyProfitCap', 'Daily profit cap ($)'],
+  ['dailyLossLimit', 'Daily loss limit (SOL)'],
+  ['dailyProfitFloor', 'Daily profit floor (SOL)'],
+  ['dailyProfitCap', 'Daily profit cap (SOL)'],
   ['minSolVolume', 'Min recent volume (SOL, 0=off)'],
+  ['minTokenAgeSec', 'Min token age (seconds, 0=off)'],
 ];
-// minMarketCapSol is edited via a dedicated USD-denominated field
-// (minMarketCapUsdInput) instead of the generic grid above, since the
-// underlying config value is stored in SOL but USD is more intuitive —
-// see wireMinMarketCapUsdInput().
+// minMarketCapSol / maxMarketCapSol are edited via dedicated USD-denominated
+// fields instead of the generic grid above, since the underlying config
+// values are stored in SOL but USD is more intuitive — see the
+// minMarketCapUsdInput/maxMarketCapUsdInput wiring further down.
 
 function buildConfigGrid(config) {
   const grid = $('configGrid');
@@ -122,11 +123,17 @@ function renderLive(state) {
 
   $('solPriceNote').textContent = state.solUsdPrice
     ? `SOL price: $${state.solUsdPrice.toFixed(2)} (refreshes every ~60s)`
-    : 'SOL price: unavailable — Min market cap (USD) filter cannot apply until this loads';
+    : 'SOL price: unavailable — Min/Max market cap (USD) filters cannot apply until this loads';
   $('minMarketCapUsdInput').dataset.solPrice = state.solUsdPrice || '';
+  $('maxMarketCapUsdInput').dataset.solPrice = state.solUsdPrice || '';
   if (document.activeElement !== $('minMarketCapUsdInput')) {
     $('minMarketCapUsdInput').value = state.solUsdPrice
       ? Math.round((state.config.minMarketCapSol || 0) * state.solUsdPrice)
+      : '';
+  }
+  if (document.activeElement !== $('maxMarketCapUsdInput')) {
+    $('maxMarketCapUsdInput').value = state.solUsdPrice
+      ? Math.round((state.config.maxMarketCapSol || 0) * state.solUsdPrice)
       : '';
   }
 
@@ -198,30 +205,63 @@ function render(state) {
     }).join('  ·  ');
 
   // paper balance
-  $('balanceVal').textContent = money(state.balance);
+  $('balanceVal').textContent = solStr(state.balance);
   $('balanceVal').className = 'cval ' + (state.balance > 0 ? 'good' : 'bad');
-  $('lockedVal').textContent = state.lockedInPositions > 0 ? `${money(state.lockedInPositions)} locked in ${state.positions.length} open position${state.positions.length === 1 ? '' : 's'}` : '';
+  $('lockedVal').textContent = state.lockedInPositions > 0 ? `${solStr(state.lockedInPositions)} locked in ${state.positions.length} open position${state.positions.length === 1 ? '' : 's'}` : '';
 
   // stat cards
   const pnlEl = $('pnlVal');
-  pnlEl.textContent = money(state.dailyStats.pnl);
+  pnlEl.textContent = solStr(state.dailyStats.pnl);
   pnlEl.className = 'cval ' + (state.dailyStats.pnl >= 0 ? 'good' : 'bad');
   $('wlVal').textContent = `${state.dailyStats.wins}W – ${state.dailyStats.losses}L`;
   $('posVal').textContent = `${state.positions.length} / ${state.config.maxOpenPositions}`;
   const deployed = state.positions.reduce((a, p) => a + p.size, 0);
-  $('posSub').textContent = money(deployed) + ' deployed';
-  $('limVal').textContent = money(-state.config.dailyLossLimit);
-  $('limSub').textContent = `floor ${money(state.config.dailyProfitFloor)} · cap ${money(state.config.dailyProfitCap)}`;
+  $('posSub').textContent = solStr(deployed) + ' deployed';
+  $('limVal').textContent = solStr(-state.config.dailyLossLimit);
+  $('limSub').textContent = `floor ${solStr(state.config.dailyProfitFloor)} · cap ${solStr(state.config.dailyProfitCap)}`;
 
   // equity chart
   drawEquity(state.equity, state.config);
+
+  // market scanner: movers / high cap+volume — both derived from tokens
+  // already tracked from the live feed, not any external source
+  const moversBody = document.querySelector('#moversTable tbody');
+  moversBody.innerHTML = (state.movers || []).map(m => `
+    <tr>
+      <td>${m.name}${m.hit ? ' <span class="micro" style="color:var(--amber)">●</span>' : ''}</td>
+      <td>${m.price.toFixed(6)}</td>
+      <td class="chg ${m.priceChange >= 0 ? 'up' : 'down'}">${pctStr(m.priceChange)}</td>
+      <td class="chg ${m.volChange >= 0 ? 'up' : 'down'}">${pctStr(m.volChange)}</td>
+      <td>${m.marketCapSol.toFixed(2)}</td>
+    </tr>`).join('');
+  $('moversEmpty').classList.toggle('hidden', (state.movers || []).length > 0);
+
+  const highCapBody = document.querySelector('#highCapTable tbody');
+  highCapBody.innerHTML = (state.highCapVolume || []).map(m => `
+    <tr>
+      <td>${m.name}</td>
+      <td>${m.price.toFixed(6)}</td>
+      <td>${m.marketCapSol.toFixed(2)}</td>
+      <td>${m.solVolumeEma.toFixed(3)}</td>
+    </tr>`).join('');
+  $('highCapEmpty').classList.toggle('hidden', (state.highCapVolume || []).length > 0);
+
+  const topWalletsBody = document.querySelector('#topWalletsTable tbody');
+  topWalletsBody.innerHTML = (state.topWallets || []).map(w => `
+    <tr>
+      <td>${w.wallet.slice(0, 4)}…${w.wallet.slice(-4)}</td>
+      <td>${w.totalSol.toFixed(3)} SOL</td>
+      <td>${w.buyCount}</td>
+      <td>${w.tokenCount}</td>
+    </tr>`).join('');
+  $('topWalletsEmpty').classList.toggle('hidden', (state.topWallets || []).length > 0);
 
   // open positions
   $('posTitle').textContent = `Open positions (${state.positions.length})`;
   const posBody = document.querySelector('#posTable tbody');
   posBody.innerHTML = state.positions.map(p => {
     const chg = p.currentPrice ? ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100 : 0;
-    return `<tr><td>${p.tokenName}</td><td>${p.entryPrice.toFixed(6)}</td><td>${p.currentPrice ? p.currentPrice.toFixed(6) : '—'}</td><td class="chg ${chg >= 0 ? 'up' : 'down'}">${pctStr(chg)}</td><td>${money(p.size)}</td></tr>`;
+    return `<tr><td>${p.tokenName}</td><td>${p.entryPrice.toFixed(6)}</td><td>${p.currentPrice ? p.currentPrice.toFixed(6) : '—'}</td><td class="chg ${chg >= 0 ? 'up' : 'down'}">${pctStr(chg)}</td><td>${solStr(p.size)}</td></tr>`;
   }).join('');
   $('posEmpty').classList.toggle('hidden', state.positions.length > 0);
 
@@ -244,7 +284,7 @@ function render(state) {
 
   // trade log
   const tradeBody = document.querySelector('#tradeTable tbody');
-  tradeBody.innerHTML = state.trades.slice(0, 10).map(t => `<tr><td>${t.token}</td><td class="chg ${t.pnl >= 0 ? 'up' : 'down'}">${money(t.pnl)}</td><td style="color:var(--dim)">${t.reason}</td><td>${new Date(t.closedAt).toLocaleTimeString()}</td></tr>`).join('');
+  tradeBody.innerHTML = state.trades.slice(0, 10).map(t => `<tr><td>${t.token}</td><td class="chg ${t.pnl >= 0 ? 'up' : 'down'}">${solStr(t.pnl)}</td><td style="color:var(--dim)">${t.reason}</td><td>${new Date(t.closedAt).toLocaleTimeString()}</td></tr>`).join('');
   $('tradeEmpty').classList.toggle('hidden', state.trades.length > 0);
 
   // config
@@ -259,7 +299,7 @@ function render(state) {
   $('reportsEmpty').classList.toggle('hidden', state.reports.length > 0);
   $('reportsList').innerHTML = state.reports.map(r => `
     <div class="report-entry">
-      <div class="top"><span class="date">${r.date}</span><span class="${r.pnl >= 0 ? 'up' : 'down'}">${money(r.pnl)}</span></div>
+      <div class="top"><span class="date">${r.date}</span><span class="${r.pnl >= 0 ? 'up' : 'down'}">${solStr(r.pnl)}</span></div>
       <div class="stats">${r.wins}W / ${r.losses}L · ${r.tradeCount} trades${r.haltedReason ? ` · halted: ${r.haltedReason}` : ''}</div>
       ${r.feedback.map(f => `<div class="note">› ${f}</div>`).join('')}
     </div>`).join('');
@@ -321,6 +361,7 @@ $('toggleData').addEventListener('click', () => $('dataBody').classList.toggle('
 $('toggleConfig').addEventListener('click', () => $('configBody').classList.toggle('hidden'));
 $('toggleReports').addEventListener('click', () => $('reportsBody').classList.toggle('hidden'));
 $('toggleTune').addEventListener('click', () => $('tuneBody').classList.toggle('hidden'));
+$('toggleScanner').addEventListener('click', () => $('scannerBody').classList.toggle('hidden'));
 $('debugToggle').addEventListener('click', () => $('debugFeed').classList.toggle('hidden'));
 
 $('autoTuneBtn').addEventListener('click', () => {
@@ -331,9 +372,9 @@ $('autoTuneCheck').addEventListener('change', (e) => postJSON('/api/config', { a
 $('resetConfig').addEventListener('click', () => {
   fetch('/api/state').then(r => r.json()); // no-op fetch just to keep UX snappy
   postJSON('/api/config', {
-    positionSize: 40, maxOpenPositions: 3, momentumPriceThreshold: 9, momentumVolThreshold: 45,
-    takeProfitPct: 18, stopLossPct: 8, trailingStopPct: 6, dailyLossLimit: 150, dailyProfitFloor: 250, dailyProfitCap: 1000,
-    minMarketCapSol: 0, minSolVolume: 0,
+    positionSize: 0.5, maxOpenPositions: 3, momentumPriceThreshold: 9, momentumVolThreshold: 45,
+    takeProfitPct: 18, stopLossPct: 8, trailingStopPct: 6, dailyLossLimit: 1.5, dailyProfitFloor: 2.5, dailyProfitCap: 10,
+    minMarketCapSol: 0, maxMarketCapSol: 0, minSolVolume: 0, minTokenAgeSec: 300,
   });
 });
 
@@ -391,6 +432,16 @@ $('minMarketCapUsdInput').addEventListener('change', (e) => {
     return;
   }
   postJSON('/api/config', { minMarketCapSol: solPrice ? usd / solPrice : 0 });
+});
+
+$('maxMarketCapUsdInput').addEventListener('change', (e) => {
+  const usd = Number(e.target.value) || 0;
+  const solPrice = Number(e.target.dataset.solPrice) || 0;
+  if (usd > 0 && !solPrice) {
+    alert('SOL price has not loaded yet — try again in a moment.');
+    return;
+  }
+  postJSON('/api/config', { maxMarketCapSol: solPrice ? usd / solPrice : 0 });
 });
 
 // ---------- live connection to our own server ----------

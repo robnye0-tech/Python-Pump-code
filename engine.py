@@ -13,22 +13,30 @@ HISTORY_LEN = 40
 TUNE_EVERY_N_TRADES = 8
 
 DEFAULT_CONFIG = {
-    "positionSize": 40,
+    # paper trading is SOL-denominated throughout (matches live trading's
+    # units) — positionSize, dailyLossLimit, dailyProfitFloor, dailyProfitCap
+    # and the paper balance are all in SOL, not dollars
+    "positionSize": 0.5,
     "maxOpenPositions": 3,
     "momentumPriceThreshold": 9,
     "momentumVolThreshold": 45,
     "takeProfitPct": 18,
     "stopLossPct": 8,
     "trailingStopPct": 6,
-    "dailyLossLimit": 150,
-    "dailyProfitFloor": 250,
-    "dailyProfitCap": 1000,
+    "dailyLossLimit": 1.5,
+    "dailyProfitFloor": 2.5,
+    "dailyProfitCap": 10,
     "autoTune": False,
     # 0 = disabled. Both use data already present in PumpPortal's feed
     # (marketCapSol directly; solVolumeEma is a decayed sum of real SOL trade
     # amounts tracked per-token below) — no external data source involved.
     "minMarketCapSol": 0,
+    "maxMarketCapSol": 0,
     "minSolVolume": 0,
+    # skip tokens younger than this — 0 = disabled. Set at the call site in
+    # server.py (not here) since it needs a live clock, which this module
+    # deliberately never touches to stay pure/testable.
+    "minTokenAgeSec": 300,
 }
 
 # bounds the self-tuner is allowed to move strategy params within — it never
@@ -50,9 +58,9 @@ def pct(a: float, b: float) -> float:
     return 0 if b == 0 else ((a - b) / b) * 100
 
 
-def money(n: float) -> str:
+def sol_str(n: float) -> str:
     sign = "-" if n < 0 else ""
-    return f"{sign}${abs(n):.2f}"
+    return f"{sign}{abs(n):.4f} SOL"
 
 
 def make_sim_token(name: str) -> dict:
@@ -134,8 +142,10 @@ def momentum_signal(t: dict, cfg: dict) -> dict:
     # directly; solVolumeEma is a decayed sum of real SOL trade amounts) — 0
     # means the filter is off. Simulated tokens have no real market cap/volume
     # data, so they're only gated by these filters when a filter is actually set.
+    max_mc = cfg.get("maxMarketCapSol", 0)
     size_ok = (
         t.get("marketCapSol", 0) >= cfg.get("minMarketCapSol", 0)
+        and (max_mc <= 0 or t.get("marketCapSol", 0) <= max_mc)
         and t.get("solVolumeEma", 0) >= cfg.get("minSolVolume", 0)
     ) if t.get("live") else True
     hit = eligible and size_ok and price_change >= cfg["momentumPriceThreshold"] and vol_change >= cfg["momentumVolThreshold"]
@@ -156,7 +166,7 @@ def gen_feedback(trades: list[dict], cfg: dict) -> list[str]:
     tp_outs = sum(1 for t in recent if t["reason"] == "take-profit")
 
     notes = []
-    notes.append(f"Last {len(recent)} trades: {win_rate:.0f}% win rate, avg win {money(avg_win)}, avg loss {money(avg_loss)}.")
+    notes.append(f"Last {len(recent)} trades: {win_rate:.0f}% win rate, avg win {sol_str(avg_win)}, avg loss {sol_str(avg_loss)}.")
     if stop_outs / len(recent) > 0.4:
         notes.append(f"{stop_outs} of {len(recent)} exits hit stop-loss. Stop-loss ({cfg['stopLossPct']}%) may be too tight for this volatility — consider widening it or lowering position size instead.")
     if tp_outs / len(recent) > 0.5 and avg_win < abs(avg_loss) * 1.5:

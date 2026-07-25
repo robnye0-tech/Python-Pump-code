@@ -6,8 +6,29 @@ import json
 import os
 import threading
 
-DATA_DIR = os.path.join(os.getcwd(), "data")
+DATA_DIR = os.path.join(os.getcwd(), "bin")
 DATA_FILE = os.path.join(DATA_DIR, "state.json")
+
+# earlier versions used ./data instead of ./bin — migrate it once so nobody
+# loses their trade history / auto-tuned config on upgrade
+_LEGACY_DATA_FILE = os.path.join(os.getcwd(), "data", "state.json")
+
+
+def _migrate_legacy_data_dir() -> None:
+    if os.path.exists(DATA_FILE) or not os.path.exists(_LEGACY_DATA_FILE):
+        return
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(_LEGACY_DATA_FILE, "r", encoding="utf-8") as f:
+            contents = f.read()
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            f.write(contents)
+        print(f"[state] migrated saved state from ./data/ to ./{os.path.basename(DATA_DIR)}/")
+    except Exception as e:
+        print(f"[state] could not migrate legacy ./data/ folder: {e}")
+
+
+_migrate_legacy_data_dir()
 
 _save_timer: threading.Timer | None = None
 _save_lock = threading.Lock()

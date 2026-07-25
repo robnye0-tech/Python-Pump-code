@@ -52,8 +52,23 @@ def _rand_suffix() -> str:
 _saved = state_store.load_persisted() or {}
 _saved_live = _saved.get("liveTrading") or {}
 
+# Paper trading switched from $ to SOL denomination. A save from before that
+# change has positionSize/dailyLossLimit/dailyProfitFloor/dailyProfitCap/
+# balance in dollar-scale numbers — reinterpreting those directly as SOL
+# would be wildly wrong (e.g. a $1000 balance becoming "1000 SOL"), so an
+# unmigrated save gets fresh SOL-scale defaults for just those fields
+# instead of trusting the old numbers. Everything else (trade history,
+# momentum thresholds, tuning log, etc.) carries over unaffected.
+_paper_is_sol = _saved.get("paperUnit") == "sol"
+_saved_config = dict(_saved.get("config") or {})
+_saved_balance = _saved.get("balance")
+if not _paper_is_sol:
+    for _k in ("positionSize", "dailyLossLimit", "dailyProfitFloor", "dailyProfitCap"):
+        _saved_config.pop(_k, None)
+    _saved_balance = None
+
 state = {
-    "config": {**engine.DEFAULT_CONFIG, **(_saved.get("config") or {})},
+    "config": {**engine.DEFAULT_CONFIG, **_saved_config},
     "dataMode": "simulated",  # 'simulated' | 'live'
     "apiKey": _saved.get("apiKey", ""),
     "ntfyTopic": _saved.get("ntfyTopic", ""),
@@ -69,7 +84,7 @@ state = {
     "reports": _saved.get("reports", []),
     "tuningLog": _saved.get("tuningLog", []),
     "equity": _saved.get("equity") or [{"t": 0, "v": 0}],
-    "balance": _saved.get("balance") if isinstance(_saved.get("balance"), (int, float)) else 1000,
+    "balance": _saved_balance if isinstance(_saved_balance, (int, float)) else 10,
     "newTokenFeed": [],
     "migrationFeed": [],
     "debugFeed": [],
@@ -106,6 +121,7 @@ class Runtime:
         self.live_connection = None
         self.live_busy = False
         self.buy_cooldowns: dict[str, float] = {}  # tokenId -> epoch time to skip re-attempting until
+        self.wallet_buys: list[dict] = []  # rolling window of {wallet, solAmount, mint, at} — informational only, not wired into trade decisions
 
 
 runtime = Runtime()
@@ -114,6 +130,7 @@ connected_clients: set[WebSocket] = set()
 
 def persist():
     state_store.save_persisted({
+        "paperUnit": "sol",  # marks this save as already using SOL-denominated paper config — see the migration note above
         "config": state["config"],
         "apiKey": state["apiKey"],
         "ntfyTopic": state["ntfyTopic"],
@@ -261,6 +278,9 @@ async def live_tick():
                     continue
                 if now < runtime.buy_cooldowns.get(tok["id"], 0):
                     continue  # this token just failed to buy — skip it for a bit rather than hammering the same failure
+                min_age_sec = state["config"].get("minTokenAgeSec", 0)
+                if min_age_sec > 0 and (now * 1000 - tok.get("createdAt", 0)) / 1000 < min_age_sec:
+                    continue  # too new — let it prove itself for a bit before considering it
                 sig = engine.momentum_signal(tok, state["config"])
                 if not sig["hit"]:
                     continue
@@ -304,6 +324,43 @@ async def live_tick():
         disable_live_trading(str(e))
     finally:
         runtime.live_busy = False
+
+
+# ---------- whale wallet tracking (informational only — never wired into trade decisions) ----------
+# Ranks wallets by real buy activity already visible in the PumpPortal feed
+# (traderPublicKey + solAmount on every buy event) — no Solscan API, no
+# external source. Purely for the dashboard; the bot's own entries/exits
+# never look at this.
+WALLET_ACTIVITY_WINDOW_SEC = 2 * 60 * 60  # only consider buys from the last 2 hours
+MIN_WHALE_BUY_SOL = 1
+TOP_WALLETS_LIMIT = 50
+
+
+def _record_wallet_buy(wallet: str, sol_amount: float, mint: str) -> None:
+    if sol_amount < MIN_WHALE_BUY_SOL:
+        return
+    now = time.time()
+    cutoff = now - WALLET_ACTIVITY_WINDOW_SEC
+    runtime.wallet_buys = [b for b in runtime.wallet_buys if b["at"] >= cutoff]
+    runtime.wallet_buys.append({"wallet": wallet, "solAmount": sol_amount, "mint": mint, "at": now})
+
+
+def _top_wallets(limit: int = TOP_WALLETS_LIMIT) -> list[dict]:
+    now = time.time()
+    cutoff = now - WALLET_ACTIVITY_WINDOW_SEC
+    agg: dict[str, dict] = {}
+    for b in runtime.wallet_buys:
+        if b["at"] < cutoff:
+            continue
+        entry = agg.setdefault(b["wallet"], {"wallet": b["wallet"], "totalSol": 0.0, "buyCount": 0, "tokens": set()})
+        entry["totalSol"] += b["solAmount"]
+        entry["buyCount"] += 1
+        entry["tokens"].add(b["mint"])
+    ranked = sorted(agg.values(), key=lambda e: e["totalSol"], reverse=True)[:limit]
+    return [
+        {"wallet": e["wallet"], "totalSol": round(e["totalSol"], 3), "buyCount": e["buyCount"], "tokenCount": len(e["tokens"])}
+        for e in ranked
+    ]
 
 
 # ---------- pump.fun live feed ----------
@@ -365,6 +422,10 @@ async def _handle_pump_message(raw, ws):
             engine.apply_trade_to_token(t, sol_amount, token_amount, float(market_cap_sol) if market_cap_sol is not None else None) if t["id"] == mint else t
             for t in state["tokens"]
         ]
+        if tx_type == "buy":
+            trader = _coalesce(data.get("traderPublicKey"), data.get("trader"))
+            if trader:
+                _record_wallet_buy(trader, sol_amount, mint)
 
 
 async def _pump_ws_run():
@@ -457,7 +518,7 @@ def check_rollover():
     halted_note = f" · halted: {report['haltedReason']}" if report["haltedReason"] else ""
     asyncio.create_task(notify_ntfy(
         f"Signal Desk — {report['date']} closed",
-        f"P&L {'+' if report['pnl'] >= 0 else ''}${report['pnl']:.2f} · {report['wins']}W/{report['losses']}L · {report['tradeCount']} trades{halted_note}",
+        f"P&L {'+' if report['pnl'] >= 0 else ''}{report['pnl']:.4f} SOL · {report['wins']}W/{report['losses']}L · {report['tradeCount']} trades{halted_note}",
     ))
 
 
@@ -519,6 +580,8 @@ async def tick():
     final_open = still_open
     if can_open_new:
         held_ids = {p["tokenId"] for p in still_open}
+        now = time.time()
+        min_age_sec = state["config"].get("minTokenAgeSec", 0)
         for tok in state["tokens"]:
             if len(final_open) >= state["config"]["maxOpenPositions"]:
                 break
@@ -526,6 +589,8 @@ async def tick():
                 break  # out of paper funds
             if tok["id"] in held_ids or tok["price"] <= 0:
                 continue
+            if min_age_sec > 0 and tok.get("live") and (now * 1000 - tok.get("createdAt", 0)) / 1000 < min_age_sec:
+                continue  # too new — let it prove itself for a bit before considering it
             sig = engine.momentum_signal(tok, state["config"])
             if sig["hit"]:
                 final_open.append({
@@ -553,7 +618,7 @@ async def tick():
     if not halted and new_pnl >= state["config"]["dailyProfitCap"]:
         halted = "daily profit cap reached — locking in gains"
     state["dailyStats"] = {
-        **state["dailyStats"], "pnl": round(new_pnl, 2),
+        **state["dailyStats"], "pnl": round(new_pnl, 4),
         "wins": state["dailyStats"]["wins"] + wins_delta,
         "losses": state["dailyStats"]["losses"] + losses_delta,
         "halted": halted,
@@ -606,7 +671,7 @@ async def noon_notifier_loop():
             halted_note = f" · halted: {s['halted']}" if s["halted"] else ""
             await notify_ntfy(
                 "Signal Desk — midday check-in",
-                f"Today so far: {'+' if s['pnl'] >= 0 else ''}${s['pnl']:.2f} · {s['wins']}W/{s['losses']}L{halted_note}",
+                f"Today so far: {'+' if s['pnl'] >= 0 else ''}{s['pnl']:.4f} SOL · {s['wins']}W/{s['losses']}L{halted_note}",
             )
         await asyncio.sleep(30)
 
@@ -655,6 +720,38 @@ async def _open_browser_delayed(url: str):
         pass
 
 
+# ---------- market scanner: movers / high cap+volume ----------
+# Both computed entirely from tokens already tracked from the live feed —
+# no scraping, no external "movers" API, just ranking data the bot already
+# has for its own momentum signal.
+def _live_tokens_with_data():
+    return [t for t in state["tokens"] if t.get("live") and t.get("hasTradeData")]
+
+
+def _movers_list(limit: int = 10) -> list[dict]:
+    scored = [(t, engine.momentum_signal(t, state["config"])) for t in _live_tokens_with_data()]
+    scored.sort(key=lambda pair: pair[1]["priceChange"], reverse=True)
+    return [
+        {
+            "id": t["id"], "name": t["name"], "price": t["price"],
+            "priceChange": sig["priceChange"], "volChange": sig["volChange"],
+            "marketCapSol": t.get("marketCapSol", 0), "hit": sig["hit"],
+        }
+        for t, sig in scored[:limit]
+    ]
+
+
+def _highcap_volume_list(limit: int = 10) -> list[dict]:
+    scored = sorted(_live_tokens_with_data(), key=lambda t: (t.get("marketCapSol", 0), t.get("solVolumeEma", 0)), reverse=True)
+    return [
+        {
+            "id": t["id"], "name": t["name"], "price": t["price"],
+            "marketCapSol": t.get("marketCapSol", 0), "solVolumeEma": t.get("solVolumeEma", 0),
+        }
+        for t in scored[:limit]
+    ]
+
+
 # ---------- HTTP + WS API for the dashboard ----------
 def public_state() -> dict:
     def _tok_field(token_id, field):
@@ -668,10 +765,13 @@ def public_state() -> dict:
         "pumpPortalNotice": state["pumpPortalNotice"],
         "solUsdPrice": state["solUsdPrice"],
         "solUsdPriceAt": state["solUsdPriceAt"],
+        "movers": _movers_list(),
+        "highCapVolume": _highcap_volume_list(),
+        "topWallets": _top_wallets(),
         "running": state["running"],
         "hasApiKey": bool(state["apiKey"]),
         "ntfyTopic": state["ntfyTopic"],
-        "balance": round(state["balance"], 2),
+        "balance": round(state["balance"], 4),
         "lockedInPositions": round(sum(p["size"] for p in state["positions"]), 2),
         "tokens": [
             {
