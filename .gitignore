@@ -5,8 +5,10 @@ __pycache__/
 data/
 .DS_Store
 
-# never commit real wallet key material
-wallet/
+# never commit real wallet key material — the wallet/ folder itself and its
+# placeholder instructions stay tracked; only the actual key file is ignored
+wallet/keypair.json
+wallet/*.json
 *.keypair.json
 id.json
 *-keypair.json

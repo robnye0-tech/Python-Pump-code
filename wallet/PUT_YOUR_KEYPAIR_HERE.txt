@@ -1,0 +1,24 @@
+Create a file in this folder named exactly "keypair.json" (or update the
+"Keypair file path" field in the Live trading panel to point elsewhere).
+
+On Windows: open Notepad, paste your key in, then File > Save As — set
+"Save as type" to "All Files (*.*)" (not Text Documents), and set the file
+name to keypair.json. If you leave "Save as type" on Text Documents,
+Windows will silently save it as keypair.json.txt instead, which the bot
+won't find.
+
+What to paste in — either of these works, wallet.py auto-detects which:
+
+  - The base58 string Phantom/Solflare gives you from Settings > Export
+    Private Key (NOT "Show Recovery Phrase" / "Secret Recovery Phrase" —
+    that's a different, 12/24-word thing for your whole wallet, not what
+    goes here). Paste it in exactly as copied, nothing else in the file.
+
+  - A JSON array of 64 numbers (the Solana CLI format), e.g. what
+    `solana-keygen new -o wallet/keypair.json` produces directly.
+
+Treat this file exactly like a seed phrase: anyone who gets it can drain
+the wallet. It is never committed to git (see .gitignore — only this
+placeholder and the wallet/ folder itself are tracked, the real key file
+is not) and never sent anywhere except read locally by wallet.py to sign
+transactions.
