@@ -25,7 +25,10 @@
       <button id="runBtn" class="btn">PAUSED</button>
     </div>
 
-    <div id="haltBanner" class="banner hidden"></div>
+    <div id="haltBanner" class="banner hidden">
+      <span id="haltBannerText"></span>
+      <button id="clearHaltBtn" class="linklike" style="margin-left:auto;">Resume trading today</button>
+    </div>
 
     <div class="panel">
       <div class="panel-head"><span>Paper trading account</span></div>
@@ -97,7 +100,10 @@
           <div class="card"><div class="clabel">Live P&L today</div><div id="livePnlVal" class="cval">0.000000 SOL</div></div>
           <div class="card"><div class="clabel">Win / Loss</div><div id="liveWlVal" class="cval">0W – 0L</div></div>
         </div>
-        <div id="liveHaltBanner" class="banner hidden"></div>
+        <div id="liveHaltBanner" class="banner hidden">
+          <span id="liveHaltBannerText"></span>
+          <button id="liveClearHaltBtn" class="linklike" style="margin-left:auto;">Resume trading today</button>
+        </div>
 
         <div class="microlabel" style="margin-top:10px;">Open live positions</div>
         <table id="livePosTable"><thead><tr><th>Token</th><th>Entry</th><th>Now</th><th>Chg</th><th>SOL</th><th></th></tr></thead><tbody></tbody></table>

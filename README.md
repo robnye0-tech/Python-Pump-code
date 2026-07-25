@@ -213,7 +213,13 @@ dashboard, used only to size simulated trades.
 ## Safety rails (paper trading)
 
 Same daily loss limit / profit floor+cap / self-tune behavior as the Node version —
-see the dashboard's Parameters panel.
+see the dashboard's Parameters panel. Set a limit to `0` to disable it entirely.
+
+If a limit halts trading for the day, the halt banner (paper or live) shows a
+**"Resume trading today"** button — it otherwise only clears automatically at
+UTC date rollover, which can be many hours from local midnight. Clicking it
+lets you keep trading for the rest of today regardless of where P&L currently
+sits; it resets like normal at the next actual day rollover.
 
 ## Project structure
 

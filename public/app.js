@@ -103,7 +103,7 @@ function renderLive(state) {
   if (cfg.lastError) $('liveErrBox').textContent = cfg.lastError;
 
   if (state.liveDailyStats.halted) {
-    $('liveHaltBanner').textContent = `Live trading halted for today: ${state.liveDailyStats.halted}.`;
+    $('liveHaltBannerText').textContent = `Live trading halted for today: ${state.liveDailyStats.halted}.`;
     $('liveHaltBanner').classList.remove('hidden');
   } else {
     $('liveHaltBanner').classList.add('hidden');
@@ -166,7 +166,7 @@ function render(state) {
 
   // halt banner
   if (state.dailyStats.halted) {
-    $('haltBanner').textContent = `Trading halted for today: ${state.dailyStats.halted}. New entries are blocked; existing positions still manage themselves.`;
+    $('haltBannerText').textContent = `Trading halted for today: ${state.dailyStats.halted}. New entries are blocked; existing positions still manage themselves.`;
     $('haltBanner').classList.remove('hidden');
   } else {
     $('haltBanner').classList.add('hidden');
@@ -340,6 +340,9 @@ $('runBtn').addEventListener('click', () => {
   const nowRunning = $('runBtn').textContent === 'RUNNING';
   postJSON('/api/control', { running: !nowRunning });
 });
+
+$('clearHaltBtn').addEventListener('click', () => postJSON('/api/clear-halt', {}));
+$('liveClearHaltBtn').addEventListener('click', () => postJSON('/api/live/clear-halt', {}));
 
 $('depositBtn').addEventListener('click', () => {
   const amt = Number($('fundsInput').value);

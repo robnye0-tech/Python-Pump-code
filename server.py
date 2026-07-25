@@ -80,7 +80,7 @@ state = {
     "tokens": [engine.make_sim_token(n) for n in SIM_TOKEN_NAMES],
     "positions": [],
     "trades": _saved.get("trades", []),
-    "dailyStats": _saved.get("dailyStats") or {"date": engine.today_str(), "pnl": 0, "wins": 0, "losses": 0, "halted": None},
+    "dailyStats": _saved.get("dailyStats") or {"date": engine.today_str(), "pnl": 0, "wins": 0, "losses": 0, "halted": None, "haltOverridden": False},
     "reports": _saved.get("reports", []),
     "tuningLog": _saved.get("tuningLog", []),
     "equity": _saved.get("equity") or [{"t": 0, "v": 0}],
@@ -103,7 +103,7 @@ state = {
     },
     "livePositions": [],
     "liveTrades": _saved.get("liveTrades", []),
-    "liveDailyStats": _saved.get("liveDailyStats") or {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None},
+    "liveDailyStats": _saved.get("liveDailyStats") or {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None, "haltOverridden": False},
 }
 
 
@@ -174,7 +174,7 @@ def disable_live_trading(reason: str | None = None):
 def check_live_rollover():
     if state["liveDailyStats"]["date"] == engine.today_str():
         return
-    state["liveDailyStats"] = {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None}
+    state["liveDailyStats"] = {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None, "haltOverridden": False}
 
 
 SELL_RETRY_SLIPPAGE_STEP = 5   # widen slippage tolerance this much per consecutive failed exit attempt
@@ -264,7 +264,12 @@ async def live_tick():
                 still_open.append({**pos, "highWater": high_water})
         state["livePositions"] = still_open
 
-        if not state["liveDailyStats"]["halted"] and state["liveDailyStats"]["pnlSol"] <= -cfg["dailyLossLimitSol"]:
+        if (
+            not state["liveDailyStats"]["halted"]
+            and not state["liveDailyStats"].get("haltOverridden")
+            and cfg["dailyLossLimitSol"] > 0
+            and state["liveDailyStats"]["pnlSol"] <= -cfg["dailyLossLimitSol"]
+        ):
             state["liveDailyStats"]["halted"] = "daily SOL loss limit reached"
 
         can_open = not state["liveDailyStats"]["halted"] and len(state["livePositions"]) < cfg["maxConcurrentPositions"]
@@ -512,7 +517,7 @@ def check_rollover():
         "feedback": engine.gen_feedback(closed_today, state["config"]),
     }
     state["reports"] = ([report] + state["reports"])[:60]
-    state["dailyStats"] = {"date": engine.today_str(), "pnl": 0, "wins": 0, "losses": 0, "halted": None}
+    state["dailyStats"] = {"date": engine.today_str(), "pnl": 0, "wins": 0, "losses": 0, "halted": None, "haltOverridden": False}
     state["equity"] = [{"t": 0, "v": 0}]
     runtime.last_tune_count = 0
     halted_note = f" · halted: {report['haltedReason']}" if report["haltedReason"] else ""
@@ -613,9 +618,10 @@ async def tick():
 
     new_pnl = state["dailyStats"]["pnl"] + pnl_delta
     halted = state["dailyStats"]["halted"]
-    if not halted and new_pnl <= -state["config"]["dailyLossLimit"]:
+    overridden = state["dailyStats"].get("haltOverridden")
+    if not halted and not overridden and state["config"]["dailyLossLimit"] > 0 and new_pnl <= -state["config"]["dailyLossLimit"]:
         halted = "daily loss limit reached"
-    if not halted and new_pnl >= state["config"]["dailyProfitCap"]:
+    if not halted and not overridden and state["config"]["dailyProfitCap"] > 0 and new_pnl >= state["config"]["dailyProfitCap"]:
         halted = "daily profit cap reached — locking in gains"
     state["dailyStats"] = {
         **state["dailyStats"], "pnl": round(new_pnl, 4),
@@ -843,6 +849,20 @@ async def api_post_control(req: Request):
     return {"ok": True}
 
 
+@app.post("/api/clear-halt")
+async def api_clear_halt():
+    # The halt otherwise only clears automatically at UTC date rollover,
+    # which can be many hours away from local midnight — this lets you
+    # resume paper trading today without waiting for it or restarting.
+    # haltOverridden also suppresses the halt condition from re-triggering
+    # immediately on the next tick if today's P&L is still past the limit —
+    # without it, clearing "halted" alone would just flip right back on.
+    state["dailyStats"]["halted"] = None
+    state["dailyStats"]["haltOverridden"] = True
+    persist()
+    return {"ok": True}
+
+
 @app.post("/api/datamode")
 async def api_post_datamode(req: Request):
     body = await req.json()
@@ -940,6 +960,17 @@ async def api_live_reset():
     state["livePositions"] = []
     state["liveTrading"]["lastError"] = None
     runtime.buy_cooldowns = {}
+    persist()
+    return {"ok": True}
+
+
+@app.post("/api/live/clear-halt")
+async def api_live_clear_halt():
+    # Same idea as /api/clear-halt but for live trading's daily SOL loss
+    # limit — otherwise only clears at UTC date rollover, and would
+    # otherwise re-trigger on the very next tick if pnl is still past the limit.
+    state["liveDailyStats"]["halted"] = None
+    state["liveDailyStats"]["haltOverridden"] = True
     persist()
     return {"ok": True}
 
