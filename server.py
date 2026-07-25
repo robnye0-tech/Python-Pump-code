@@ -156,6 +156,20 @@ def check_live_rollover():
     state["liveDailyStats"] = {"date": engine.today_str(), "pnlSol": 0, "wins": 0, "losses": 0, "halted": None}
 
 
+def _log_failed_trade(token_name: str, action: str, sol_amount: float, error: str):
+    """Records a failed buy/sell attempt in the live trade log — previously
+    a failure only overwrote the single lastError field, with no persistent
+    record, so a repeated failure pattern (e.g. slippage too tight) was
+    invisible."""
+    state["liveTrades"] = ([{
+        "id": f"{token_name}-{int(datetime.now().timestamp() * 1000)}",
+        "token": token_name, "action": action, "reason": "failed",
+        "solSpent": sol_amount, "pnlSol": None, "signature": None, "explorerUrl": None,
+        "date": state["liveDailyStats"]["date"], "closedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "failed", "error": error,
+    }] + state["liveTrades"])[:200]
+
+
 async def live_tick():
     """Runs on its own slower interval, decoupled from the paper tick,
     because real trades involve network round-trips (build tx, simulate,
@@ -211,6 +225,7 @@ async def live_tick():
                 except TradeError as e:
                     print(f"[live] sell failed, will retry next tick: {e}")
                     state["liveTrading"]["lastError"] = str(e)
+                    _log_failed_trade(tok.get("name") or pos["tokenId"], "sell", pos["solSpent"], str(e))
                     still_open.append(pos)
                     continue
             else:
@@ -261,6 +276,7 @@ async def live_tick():
                 except TradeError as e:
                     print(f"[live] buy failed: {e}")
                     state["liveTrading"]["lastError"] = str(e)
+                    _log_failed_trade(tok.get("name") or tok["id"], "buy", cfg["maxSolPerTrade"], str(e))
         persist()
     except Exception as e:
         # Any unexpected failure in the live loop disables live trading

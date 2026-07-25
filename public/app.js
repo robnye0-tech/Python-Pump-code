@@ -115,7 +115,15 @@ function renderLive(state) {
   $('livePosEmpty').classList.toggle('hidden', state.livePositions.length > 0);
 
   const tradeBody = document.querySelector('#liveTradeTable tbody');
-  tradeBody.innerHTML = state.liveTrades.map(t => `<tr><td>${t.token}</td><td>${t.action}</td><td>${t.solSpent}</td><td class="${t.pnlSol == null ? '' : (t.pnlSol >= 0 ? 'up' : 'down')}">${t.pnlSol == null ? '—' : t.pnlSol.toFixed(6)}</td><td><a href="${t.explorerUrl}" target="_blank" rel="noopener" style="color:var(--dim)">view</a></td></tr>`).join('');
+  tradeBody.innerHTML = state.liveTrades.map(t => {
+    const pnlCell = t.status === 'failed'
+      ? '<span class="down">failed</span>'
+      : (t.pnlSol == null ? '—' : `<span class="${t.pnlSol >= 0 ? 'up' : 'down'}">${t.pnlSol.toFixed(6)}</span>`);
+    const linkCell = t.explorerUrl
+      ? `<a href="${t.explorerUrl}" target="_blank" rel="noopener" style="color:var(--dim)">view</a>`
+      : (t.error ? `<span class="micro" title="${String(t.error).replace(/"/g, '&quot;')}" style="color:var(--dim); cursor:help;">why?</span>` : '—');
+    return `<tr><td>${t.token}</td><td>${t.action}</td><td>${t.solSpent}</td><td>${pnlCell}</td><td>${linkCell}</td></tr>`;
+  }).join('');
   $('liveTradeEmpty').classList.toggle('hidden', state.liveTrades.length > 0);
 }
 
