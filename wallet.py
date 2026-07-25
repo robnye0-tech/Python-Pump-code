@@ -21,22 +21,63 @@ class WalletError(Exception):
     pass
 
 
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _base58_decode(s: str) -> bytes:
+    """Decodes base58 without an extra dependency — Phantom/Solflare's
+    "Export Private Key" gives you a plain base58 string, not a JSON array."""
+    num = 0
+    for char in s:
+        idx = _BASE58_ALPHABET.find(char)
+        if idx == -1:
+            raise ValueError(f"'{char}' is not a valid base58 character")
+        num = num * 58 + idx
+    n_bytes = (num.bit_length() + 7) // 8
+    combined = num.to_bytes(n_bytes, "big")
+    n_leading_zeros = len(s) - len(s.lstrip("1"))
+    return b"\x00" * n_leading_zeros + combined
+
+
 def load_wallet(keypair_path: str) -> Keypair:
     if not os.path.exists(keypair_path):
         raise WalletError(
-            f"No keypair file found at {keypair_path}. Export one from your wallet (Phantom: Settings > "
-            f"Export Private Key, then save the bytes as a JSON array) or generate one with the Solana CLI "
+            f"No keypair file found at {keypair_path}. Export your private key from your wallet "
+            f"(Phantom/Solflare: Settings > Export Private Key) and save it into this file exactly as given "
+            f'— either their base58 string or a JSON array both work — or generate one with the Solana CLI '
             f'("solana-keygen new -o {keypair_path}"), fund it with a small amount of SOL, then try again.'
         )
     try:
         with open(keypair_path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+            raw_text = f.read().strip()
     except Exception as e:
-        raise WalletError(f"Could not parse {keypair_path} as JSON: {e}")
-    if not isinstance(raw, list) or len(raw) != 64:
-        raise WalletError(f"{keypair_path} does not look like a Solana secret key (expected a JSON array of 64 numbers).")
+        raise WalletError(f"Could not read {keypair_path}: {e}")
+
+    # Solana CLI / this bot's own format: a JSON array of 64 secret-key bytes.
+    if raw_text.startswith("["):
+        try:
+            raw = json.loads(raw_text)
+        except Exception as e:
+            raise WalletError(f"Could not parse {keypair_path} as JSON: {e}")
+        if not isinstance(raw, list) or len(raw) != 64:
+            raise WalletError(f"{keypair_path} does not look like a Solana secret key (expected a JSON array of 64 numbers).")
+        try:
+            return Keypair.from_bytes(bytes(raw))
+        except Exception as e:
+            raise WalletError(f"Invalid keypair bytes in {keypair_path}: {e}")
+
+    # Phantom/Solflare "Export Private Key" format: a single base58 string.
     try:
-        return Keypair.from_bytes(bytes(raw))
+        decoded = _base58_decode(raw_text)
+    except Exception as e:
+        raise WalletError(
+            f"{keypair_path} doesn't look like a valid Solana secret key. It should be either a JSON array of "
+            f"64 numbers (Solana CLI format) or a single base58 string (Phantom/Solflare export format). ({e})"
+        )
+    if len(decoded) != 64:
+        raise WalletError(f"{keypair_path} decoded to {len(decoded)} bytes, expected 64 — this doesn't look like a valid secret key.")
+    try:
+        return Keypair.from_bytes(decoded)
     except Exception as e:
         raise WalletError(f"Invalid keypair bytes in {keypair_path}: {e}")
 

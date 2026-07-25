@@ -100,10 +100,13 @@ across restarts no matter what — you re-arm it every time the server starts.
 
 ### Setting it up
 
-1. **Get a keypair file** at `wallet/keypair.json` — a JSON array of 64 numbers (the
-   standard Solana secret-key format). `solana-keygen new -o wallet/keypair.json`, or
-   export raw secret-key bytes from Phantom/Solflare. Treat this file like a seed
-   phrase.
+1. **Get a keypair file** at `wallet/keypair.json`. Either `solana-keygen new -o
+   wallet/keypair.json` (Solana CLI), or export from Phantom/Solflare (Settings >
+   Export Private Key) and paste what they give you in **exactly as shown** — both
+   their usual base58 string and a JSON array of 64 numbers work, `wallet.py` detects
+   which one it is. No manual reformatting, and don't use any online "converter" for
+   this — that's handing your private key to a random website. Treat this file like a
+   seed phrase.
 2. Fund that wallet with a small amount of SOL — a dedicated hot wallet, not your main
    one.
 3. Get a real RPC endpoint (Helius/QuickNode/Triton free tier — the public default is
