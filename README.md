@@ -106,6 +106,22 @@ entirely from tokens and trades the bot already tracks from the live feed:
   `traderPublicKey` and `solAmount`, both already present on every buy event
   in PumpPortal's feed; no Solscan API or other external source involved.
 
+## Display vs. trading market cap filters
+
+**Min displayed market cap (USD, 0=show all)** in Parameters (default
+$30,000) hides small/new tokens from the ticker tape, token list, and market
+scanner — but the bot still fully tracks them internally underneath, so a
+token isn't lost forever if it later grows past the threshold. This is
+separate from **Min/Max market cap (USD)** under Entry filters, which gates
+actual trade entries — the two can be set independently (e.g. show
+everything above $30k, but only trade the $30k-$80k range).
+
+## Wide-screen layout
+
+On windows wider than ~900px the dashboard flows panels into 2 columns
+(3 columns past ~1500px) instead of one long centered column — maximize the
+browser window for a fuller view. Narrower/mobile layouts are unchanged.
+
 ## Closing a live position manually
 
 The Live trading panel's Open Positions table has a **close** button per

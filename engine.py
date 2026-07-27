@@ -37,6 +37,13 @@ DEFAULT_CONFIG = {
     # server.py (not here) since it needs a live clock, which this module
     # deliberately never touches to stay pure/testable.
     "minTokenAgeSec": 300,
+    # dashboard display-only filter (ticker tape, token list, market scanner)
+    # — separate from minMarketCapSol above, which gates trade entries. This
+    # one just keeps very small/new tokens off the screen while still fully
+    # tracking them internally, so they're not lost if they later grow past
+    # this threshold. 0 = show everything. Applied in server.py using a live
+    # SOL/USD price, not here.
+    "minDisplayMarketCapUsd": 30000,
 }
 
 # bounds the self-tuner is allowed to move strategy params within — it never

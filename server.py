@@ -726,12 +726,24 @@ async def _open_browser_delayed(url: str):
         pass
 
 
+# ---------- dashboard display filter (separate from the trading entry filter) ----------
+def _passes_display_filter(t: dict) -> bool:
+    if not t.get("live"):
+        return True  # simulated tokens always shown
+    threshold = state["config"].get("minDisplayMarketCapUsd", 0)
+    if threshold <= 0:
+        return True
+    if not state["solUsdPrice"]:
+        return True  # can't evaluate yet — don't hide everything just because the price hasn't loaded
+    return t.get("marketCapSol", 0) * state["solUsdPrice"] >= threshold
+
+
 # ---------- market scanner: movers / high cap+volume ----------
 # Both computed entirely from tokens already tracked from the live feed —
 # no scraping, no external "movers" API, just ranking data the bot already
 # has for its own momentum signal.
 def _live_tokens_with_data():
-    return [t for t in state["tokens"] if t.get("live") and t.get("hasTradeData")]
+    return [t for t in state["tokens"] if t.get("live") and t.get("hasTradeData") and _passes_display_filter(t)]
 
 
 def _movers_list(limit: int = 10) -> list[dict]:
@@ -786,7 +798,10 @@ def public_state() -> dict:
                 "marketCapSol": t.get("marketCapSol", 0), "solVolumeEma": t.get("solVolumeEma", 0),
                 "signal": engine.momentum_signal(t, state["config"]),
             }
-            for t in state["tokens"][-20:]
+            # display-only filter (minDisplayMarketCapUsd) — the underlying
+            # state["tokens"] tracking is untouched, so positions/trading
+            # logic still see every token regardless of what's shown here
+            for t in [t for t in state["tokens"] if _passes_display_filter(t)][-20:]
         ],
         "positions": [
             {**p, "tokenName": _tok_field(p["tokenId"], "name") or p["tokenId"], "currentPrice": _tok_field(p["tokenId"], "price")}

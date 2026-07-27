@@ -27,6 +27,7 @@ const CONFIG_FIELDS = [
   ['dailyProfitCap', 'Daily profit cap (SOL)'],
   ['minSolVolume', 'Min recent volume (SOL, 0=off)'],
   ['minTokenAgeSec', 'Min token age (seconds, 0=off)'],
+  ['minDisplayMarketCapUsd', 'Min displayed market cap (USD, 0=show all)'],
 ];
 // minMarketCapSol / maxMarketCapSol are edited via dedicated USD-denominated
 // fields instead of the generic grid above, since the underlying config
@@ -377,7 +378,7 @@ $('resetConfig').addEventListener('click', () => {
   postJSON('/api/config', {
     positionSize: 0.5, maxOpenPositions: 3, momentumPriceThreshold: 9, momentumVolThreshold: 45,
     takeProfitPct: 18, stopLossPct: 8, trailingStopPct: 6, dailyLossLimit: 1.5, dailyProfitFloor: 2.5, dailyProfitCap: 10,
-    minMarketCapSol: 0, maxMarketCapSol: 0, minSolVolume: 0, minTokenAgeSec: 300,
+    minMarketCapSol: 0, maxMarketCapSol: 0, minSolVolume: 0, minTokenAgeSec: 300, minDisplayMarketCapUsd: 30000,
   });
 });
 

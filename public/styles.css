@@ -45,6 +45,18 @@ body {
 
 .wrap { max-width: 820px; margin: 0 auto; padding: 20px 16px 40px; }
 
+/* On wide/maximized windows, flow panels into 2-3 masonry-style columns
+   instead of one long stretched column with uncomfortably long line
+   lengths. break-inside:avoid keeps a single panel from splitting across
+   a column boundary. Mobile/narrow layout above is untouched. */
+@media (min-width: 900px) {
+  .wrap { max-width: 1600px; column-count: 2; column-gap: 20px; }
+  .panel, .cards, .header, .tune-entry, .report-entry { break-inside: avoid; margin-bottom: 16px; }
+}
+@media (min-width: 1500px) {
+  .wrap { column-count: 3; }
+}
+
 .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .header h1 { font-size: 19px; color: var(--amber); margin: 0; display: flex; align-items: center; gap: 8px; letter-spacing: -0.02em; }
 .header .sub { color: var(--faint); font-size: 11px; font-weight: normal; }
